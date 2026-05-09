@@ -990,7 +990,7 @@ function normalizeRows(rows) {
     total_attempt:     parseInt(r.total_attempt, 10)    || 0,
     total_connect:     parseInt(r.total_connect, 10)    || 0,
     total_engagements: parseFloat(r.total_engagements)  || 0,
-  })).filter(r => Number(r.total_attempt) >= 0);
+  })).filter(r => Number(r.total_attempt) >= 0 && Number(r.total_attempt) <= 3);
 }
 
 let RAW_DATA = [];
