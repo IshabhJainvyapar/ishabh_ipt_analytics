@@ -1131,34 +1131,24 @@ function updateFilterSummary(){
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
 function updateStats(){
-  // Count total rows (a cust_id can appear multiple times in the sheet)
-  const n = FILTERED.length;
+  // Total Leads = count of unique cust_id
+  const n = new Set(FILTERED.map(r => r.cust_id).filter(Boolean)).size;
 
   const totalAtt = FILTERED.reduce((s,r)=>s+Number(r.total_attempt || 0),0);
 
-  // Connected: at least one row for this cust_id has total_connect > 0
-  const connectedLeads =
-    new Set(
-      FILTERED
-        .filter(r => Number(r.total_connect) > 0)
-        .map(r => r.cust_id)
-    ).size;
+  const connectedLeads = new Set(
+    FILTERED.filter(r => Number(r.total_connect) > 0).map(r => r.cust_id)
+  ).size;
 
-  const logins =
-    new Set(
-      FILTERED
-        .filter(hasLogin)
-        .map(r => r.cust_id)
-    ).size;
-
-  // Use unique cust_ids as denominator for rates (a customer is either logged or not)
-  const uniqueLeads = new Set(FILTERED.map(r => r.cust_id)).size;
+  const logins = new Set(
+    FILTERED.filter(hasLogin).map(r => r.cust_id)
+  ).size;
 
   document.getElementById('header-total').textContent = n.toLocaleString();
   document.getElementById('s-total').textContent = n.toLocaleString();
   document.getElementById('s-avg-att').textContent = n?((totalAtt/n).toFixed(1)):'0.0';
-  document.getElementById('s-connect-rate').textContent = uniqueLeads?pct(connectedLeads,uniqueLeads)+'%':'0%';
-  document.getElementById('s-login').textContent = uniqueLeads?pct(logins,uniqueLeads)+'%':'0%';
+  document.getElementById('s-connect-rate').textContent = n?pct(connectedLeads,n)+'%':'0%';
+  document.getElementById('s-login').textContent = n?pct(logins,n)+'%':'0%';
 }
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
@@ -1441,11 +1431,12 @@ function renderTL(){
 
 // ─── RENDER: ATTEMPT ─────────────────────────────────────────────────────────
 function renderAttempt(){
-  const n = FILTERED.length;
-  const att0 = FILTERED.filter(r=>Number(r.total_attempt)===0).length;
-  const att1 = FILTERED.filter(r=>Number(r.total_attempt)===1).length;
-  const att2 = FILTERED.filter(r=>Number(r.total_attempt)===2).length;
-  const att3 = FILTERED.filter(r=>Number(r.total_attempt)===3).length;
+  // Count unique cust_id per attempt value — matching your SQL logic
+  const n    = new Set(FILTERED.map(r => r.cust_id).filter(Boolean)).size;
+  const att0 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===0).map(r=>r.cust_id)).size;
+  const att1 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===1).map(r=>r.cust_id)).size;
+  const att2 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===2).map(r=>r.cust_id)).size;
+  const att3 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===3).map(r=>r.cust_id)).size;
 
   document.getElementById('attempt-cards').innerHTML = [
     {label:'0 Attempt',val:att0,cls:'a1'},
