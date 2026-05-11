@@ -947,101 +947,88 @@
 </div>
 
 <div class="footer">
-  <div class="footer-note">Lead Efficiency Dashboard · ≤ 3 Attempts · Live from Google Sheets · Click ↻ Refresh to pull latest</div>
+  <div class="footer-note">Lead Efficiency Dashboard · <= 3 Attempts filter active · Data refreshes from lead_efficiency_dashboard.ipynb</div>
   <div class="footer-note" style="color:var(--muted2);" id="filter-summary"></div>
 </div>
 
 <script>
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/1_ERC3roK2Hxyal5JBd1mfyuq9aCg3sEQSJDgw-4CrjE/export?format=csv&gid=941450880';
 
+// ─── DATE NORMALISER ─────────────────────────────────────────────────────────
+// Sheet dates come as "M/D/YYYY" — convert to "YYYY-MM-DD" for reliable filtering
+function toISODate(val){
+  const s = String(val ?? '').trim();
+  if(!s) return '';
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  return s;
+}
+
 // ─── CSV PARSER ───────────────────────────────────────────────────────────────
-function parseCSVText(text) {
+function parseCSVText(text){
   const lines = text.trim().split('\n');
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
   return lines.slice(1).filter(l => l.trim()).map(line => {
-    const vals = [];
-    let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') { inQ = !inQ; }
-      else if (line[i] === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
-      else cur += line[i];
+    const vals = []; let cur = '', inQ = false;
+    for(let i = 0; i < line.length; i++){
+      if(line[i]==='"'){ inQ=!inQ; }
+      else if(line[i]===','&&!inQ){ vals.push(cur.trim()); cur=''; }
+      else cur+=line[i];
     }
     vals.push(cur.trim());
     const obj = {};
-    headers.forEach((h, i) => obj[h] = (vals[i] || '').replace(/^"|"$/g, ''));
+    headers.forEach((h,i)=>obj[h]=(vals[i]||'').replace(/^"|"$/g,''));
     return obj;
   });
 }
 
-// Convert sheet date "M/D/YYYY" or "M/D/YYYY H:MM:SS" → "YYYY-MM-DD" for reliable comparison
-function toISODate(val) {
-  const s = String(val ?? '').trim();
-  if (!s) return '';
-  // Already ISO
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  // M/D/YYYY or M/D/YYYY H:MM:SS
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
-  return s;
-}
-
-function normalizeRows(rows) {
-  return (Array.isArray(rows) ? rows : []).map(r => {
-    const att = parseInt(r.total_attempt, 10);
-    return {
-      ...r,
-      cust_id:       String(r.cust_id ?? '').trim(),
-      TP_Flag:       String(r.TP_Flag ?? '').trim().toUpperCase(),
-      ipt_team:      String(r.ipt_team ?? '').trim().toLowerCase(),
-      agent_email:   String(r.agent_email ?? '').trim(),
-      team_lead:     String(r.team_lead ?? '').trim(),
-      // normalise dates to YYYY-MM-DD so date filter & sorting work correctly
-      assigned_date: toISODate(r.assigned_date),
-      login_date:    toISODate(r.login_date),
-      partner_source_of_leads: String(
-        r.partner_source_of_leads ?? r.partner_souce_of_lead ?? ''
-      ).trim(),
-      // use NaN-safe parse; keep blank attempts as NaN so they get filtered out below
-      total_attempt:     isNaN(att) ? null : att,
-      total_connect:     parseInt(r.total_connect, 10)    || 0,
-      total_engagements: parseFloat(r.total_engagements)  || 0,
-    };
-  // Only keep rows where attempt is a real number 0–3 (matches original BQ query)
-  }).filter(r => r.total_attempt !== null && r.total_attempt >= 0 && r.total_attempt <= 3);
+function normalizeRows(rows){
+  return (Array.isArray(rows) ? rows : []).map(r=>({
+    ...r,
+    cust_id: String(r.cust_id ?? '').trim(),
+    TP_Flag: String(r.TP_Flag ?? '').trim().toUpperCase(),
+    ipt_team: String(r.ipt_team ?? '').trim().toLowerCase(),
+    agent_email: String(r.agent_email ?? '').trim(),
+    team_lead: String(r.team_lead ?? '').trim(),
+    assigned_date: toISODate(r.assigned_date),
+    login_date: toISODate(r.login_date),
+    partner_source_of_leads: String(r.partner_source_of_leads ?? r.partner_souce_of_lead ?? '').trim(),
+    total_attempt: parseInt(r.total_attempt, 10) || 0,
+    total_connect: parseInt(r.total_connect, 10) || 0,
+    total_engagements: parseInt(r.total_engagements, 10) || 0,
+  })).filter(r => Number(r.total_attempt) >= 0 && Number(r.total_attempt) <= 3);
 }
 
 let RAW_DATA = [];
-let FILTERED  = [];
+let FILTERED = [];
 
 // ─── FILTERS STATE ────────────────────────────────────────────────────────────
-let filters   = { tp:'ALL', ipt:'ALL', tl:'ALL', agent:'ALL', source:'ALL', login:'ALL' };
+let filters = { tp:'ALL', ipt:'ALL', tl:'ALL', agent:'ALL', source:'ALL', login:'ALL' };
 let sortState = { view:'agent', col:'leads', dir:'desc' };
 
 // ─── FETCH FROM GOOGLE SHEETS ─────────────────────────────────────────────────
-async function fetchSheetData() {
+async function fetchSheetData(){
   const PROXY = 'https://corsproxy.io/?url=';
-  const url   = PROXY + encodeURIComponent(SHEET_CSV_URL);
-  const res   = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text  = await res.text();
-  return normalizeRows(parseCSVText(text));
+  const res = await fetch(PROXY + encodeURIComponent(SHEET_CSV_URL), { cache:'no-store' });
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  return normalizeRows(parseCSVText(await res.text()));
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-async function init() {
+async function init(){
   document.getElementById('last-updated').textContent = 'Loading…';
-  try {
+  try{
     RAW_DATA = await fetchSheetData();
     FILTERED = [...RAW_DATA];
     document.getElementById('last-updated').textContent = new Date().toLocaleString();
     populateDropdowns();
     applyFilters();
-  } catch(err) {
+  } catch(err){
     document.getElementById('last-updated').textContent = 'Error';
     document.getElementById('agent-tbody').innerHTML =
       `<tr><td colspan="8" class="no-data" style="color:var(--red);">
-        Could not load Google Sheet. Ensure it is published: File → Share → Publish to web → CSV.<br>
-        Error: ${err.message}
+        Could not load Google Sheet. Ensure it is published: File → Share → Publish to web → CSV.<br>Error: ${err.message}
       </td></tr>`;
     console.error('Sheet load error:', err);
   }
@@ -1131,18 +1118,23 @@ function updateFilterSummary(){
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
 function updateStats(){
-  // Total Leads = count of unique cust_id
-  const n = new Set(FILTERED.map(r => r.cust_id).filter(Boolean)).size;
+  const n = new Set(FILTERED.map(r => r.cust_id)).size;
 
   const totalAtt = FILTERED.reduce((s,r)=>s+Number(r.total_attempt || 0),0);
 
-  const connectedLeads = new Set(
-    FILTERED.filter(r => Number(r.total_connect) > 0).map(r => r.cust_id)
-  ).size;
+  const connectedLeads =
+    new Set(
+      FILTERED
+        .filter(r => Number(r.total_connect) > 0)
+        .map(r => r.cust_id)
+    ).size;
 
-  const logins = new Set(
-    FILTERED.filter(hasLogin).map(r => r.cust_id)
-  ).size;
+  const logins =
+    new Set(
+      FILTERED
+        .filter(hasLogin)
+        .map(r => r.cust_id)
+    ).size;
 
   document.getElementById('header-total').textContent = n.toLocaleString();
   document.getElementById('s-total').textContent = n.toLocaleString();
@@ -1431,12 +1423,11 @@ function renderTL(){
 
 // ─── RENDER: ATTEMPT ─────────────────────────────────────────────────────────
 function renderAttempt(){
-  // Count unique cust_id per attempt value — matching your SQL logic
-  const n    = new Set(FILTERED.map(r => r.cust_id).filter(Boolean)).size;
-  const att0 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===0).map(r=>r.cust_id)).size;
-  const att1 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===1).map(r=>r.cust_id)).size;
-  const att2 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===2).map(r=>r.cust_id)).size;
-  const att3 = new Set(FILTERED.filter(r=>Number(r.total_attempt)===3).map(r=>r.cust_id)).size;
+  const n = FILTERED.length;
+  const att0 = FILTERED.filter(r=>Number(r.total_attempt)===0).length;
+  const att1 = FILTERED.filter(r=>Number(r.total_attempt)===1).length;
+  const att2 = FILTERED.filter(r=>r.total_attempt===2).length;
+  const att3 = FILTERED.filter(r=>r.total_attempt===3).length;
 
   document.getElementById('attempt-cards').innerHTML = [
     {label:'0 Attempt',val:att0,cls:'a1'},
@@ -1592,17 +1583,16 @@ function renderSource(){
 async function handleRefresh(){
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('loading');
-  try {
+  try{
     RAW_DATA = await fetchSheetData();
     FILTERED = [...RAW_DATA];
     document.getElementById('last-updated').textContent = new Date().toLocaleString();
     populateDropdowns();
     applyFilters();
-  } catch(err) {
+  } catch(err){
     alert('Could not refresh from Google Sheet: ' + err.message);
-    console.warn('Refresh failed:', err);
-  } finally {
-    setTimeout(() => btn.classList.remove('loading'), 600);
+  } finally{
+    setTimeout(()=>btn.classList.remove('loading'), 600);
   }
 }
 
